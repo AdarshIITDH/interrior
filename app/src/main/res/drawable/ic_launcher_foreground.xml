@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- AR Reticle Corner Accents -->
+    <path
+        android:pathData="M28,34 L28,26 L36,26"
+        android:strokeWidth="2.5"
+        android:strokeColor="#00F0FF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M80,34 L80,26 L72,26"
+        android:strokeWidth="2.5"
+        android:strokeColor="#00F0FF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M28,74 L28,82 L36,82"
+        android:strokeWidth="2.5"
+        android:strokeColor="#00F0FF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M80,74 L80,82 L72,82"
+        android:strokeWidth="2.5"
+        android:strokeColor="#00F0FF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- 3D Futuristic Wardrobe Frame -->
+    <!-- Front Face Cabinet -->
+    <path
+        android:pathData="M34,32 L74,32 L74,76 L34,76 Z"
+        android:fillColor="#1E293B"
+        android:strokeWidth="2"
+        android:strokeColor="#00F0FF" />
+    <!-- Center Split Double Doors -->
+    <path
+        android:pathData="M54,32 L54,76"
+        android:strokeWidth="1.5"
+        android:strokeColor="#00F0FF" />
+    <!-- Modern Handles -->
+    <path
+        android:pathData="M51,50 L51,58"
+        android:strokeWidth="2"
+        android:strokeColor="#67E8F9"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M57,50 L57,58"
+        android:strokeWidth="2"
+        android:strokeColor="#67E8F9"
+        android:strokeLineCap="round" />
+    <!-- Bottom Drawer Divider -->
+    <path
+        android:pathData="M34,66 L74,66"
+        android:strokeWidth="1.2"
+        android:strokeColor="#38BDF8" />
+    <!-- Laser Measurement Dot -->
+    <path
+        android:pathData="M54,20 L54,23 M54,85 L54,88"
+        android:strokeWidth="2"
+        android:strokeColor="#38BDF8"
+        android:strokeLineCap="round" />
+</vector>

@@ -1,0 +1,7 @@
+{
+  "name": "VisionSpace",
+  "description": "Futuristic AR interior space planner for instant low-latency 3D wardrobe and furniture placement without login.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
