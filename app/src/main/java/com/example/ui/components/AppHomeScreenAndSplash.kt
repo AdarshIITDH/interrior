@@ -13,14 +13,19 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Architecture
+import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Handyman
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -169,11 +174,12 @@ fun SplashScreen(
 }
 
 /**
- * Screen 2: VisionSpace Main Hub Screen with 3 Cards
+ * Screen 2: VisionSpace Main Hub Screen
  */
 @Composable
 fun HomeScreen(
     onDesignInAR: () -> Unit,
+    onStartPhotoCapture: () -> Unit,
     onOpenSpaces: () -> Unit,
     onOpenExplore: () -> Unit,
     modifier: Modifier = Modifier
@@ -218,51 +224,121 @@ fun HomeScreen(
             }
 
             IconButton(
-                onClick = onDesignInAR,
+                onClick = onStartPhotoCapture,
                 modifier = Modifier
                     .size(42.dp)
                     .clip(CircleShape)
                     .background(ObsidianSurfaceVariant)
             ) {
                 Icon(
-                    imageVector = Icons.Default.CameraAlt,
-                    contentDescription = "Quick AR Camera",
-                    tint = TextPrimary,
+                    imageVector = Icons.Default.PhotoCamera,
+                    contentDescription = "Capture Site Photo",
+                    tint = CyanNeon,
                     modifier = Modifier.size(20.dp)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
-        // Card 1: Design in AR
+        // Hero Card 1: Calibrated Site Photo Studio (Fast, Zero-Lag, Real Perspective)
+        Card(
+            onClick = onStartPhotoCapture,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("card_photo_studio"),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, CyanNeon.copy(alpha = 0.5f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(CyanNeon.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PhotoCamera,
+                        contentDescription = null,
+                        tint = CyanNeon,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.size(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Site Photo Studio",
+                            color = TextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(CyanPrimary)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("PRO", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Snap wall photo • 3D wardrobe • CAD drawings & Cutting List",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                }
+
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = CyanNeon,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Card 2: Live AR Camera Mode
         HubActionCard(
-            title = "Design in AR",
-            subtitle = "Place furniture in your real space",
+            title = "Live AR Camera",
+            subtitle = "Continuous 3D spatial tracking & room scanning",
             icon = Icons.Default.ViewInAr,
-            iconTint = CyanNeon,
+            iconTint = Color(0xFF67E8F9),
             onClick = onDesignInAR,
             testTag = "card_design_ar"
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Card 2: Spaces
+        // Card 3: Saved Spaces
         HubActionCard(
-            title = "Spaces",
-            subtitle = "View your saved designs",
+            title = "Spaces & Projects",
+            subtitle = "View saved wardrobe layouts & estimates",
             icon = Icons.Default.Collections,
             iconTint = Color(0xFF60A5FA),
             onClick = onOpenSpaces,
             testTag = "card_spaces"
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Card 3: Explore
+        // Card 4: Explore Catalog
         HubActionCard(
-            title = "Explore",
-            subtitle = "Browse wardrobe styles",
+            title = "Explore Catalog",
+            subtitle = "Browse modern finishes & door styles",
             icon = Icons.Default.Explore,
             iconTint = Color(0xFF34D399),
             onClick = onOpenExplore,

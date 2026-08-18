@@ -143,6 +143,19 @@ data class RoomMeasurement(
     val recommendedDepthCm: Float = 60f
 }
 
+enum class HandleType(
+    val title: String,
+    val description: String,
+    val unitPriceInr: Double,
+    val color: Color
+) {
+    MATTE_BLACK_BAR("Matte Black Bar", "Architectural 600mm matte black aluminum pull", 350.0, Color(0xFF1E2026)),
+    BRUSHED_BRASS_BAR("Brushed Brass Profile", "Luxe brushed gold 800mm slimline handle", 550.0, Color(0xFFD4AF37)),
+    ROSE_GOLD_KNOB("Rose Gold Knob", "Modern knurled solid brass geometric knob", 280.0, Color(0xFFB76E79)),
+    CONCEALED_J_PULL("Concealed J-Pull", "Integrated minimalist edge finger groove (No protrusions)", 400.0, Color(0xFF475569)),
+    CHROME_EDGE_PROFILE("Brushed Chrome Edge", "Full-height vertical aluminum edge profile", 480.0, Color(0xFFCBD5E1))
+}
+
 data class WardrobeConfig(
     val id: String = "custom_${System.currentTimeMillis()}",
     val name: String = "Bedroom Wardrobe",
@@ -152,12 +165,16 @@ data class WardrobeConfig(
     val finish: FinishType = FinishType.WALNUT,
     val doorStyle: DoorStyle = DoorStyle.DUAL_HINGED,
     val doorOpenRatio: Float = 0.0f, // 0.0 (closed) to 1.0 (fully open)
+    val sectionsCount: Int = 3,
     val shelvesCount: Int = 4,
     val hangingRailsCount: Int = 2,
     val drawersCount: Int = 3,
     val hasShoeRack: Boolean = true,
     val hasMirrorPanel: Boolean = false,
+    val hasJewelryTray: Boolean = true,
+    val hasTrouserRack: Boolean = false,
     val ledLighting: LedLighting = LedLighting.WARM_AMBIENT,
+    val handleType: HandleType = HandleType.MATTE_BLACK_BAR,
     val handleStyle: String = "Matte Black Bar",
     val wallAnchorMode: Boolean = true
 ) {

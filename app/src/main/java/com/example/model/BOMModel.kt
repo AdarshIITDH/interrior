@@ -8,9 +8,20 @@ import kotlin.math.roundToInt
 enum class BOMCategory(val title: String, val iconName: String) {
     CARCASS_PANELS("Structural Panels", "dashboard"),
     DOORS_FACADES("Doors & Facades", "door_front"),
+    LAMINATES("Laminates & Veneer", "layers"),
+    CONSUMABLES("Glues & Edge Bending", "science"),
+    HARDWARE_FASTENERS("Hardware & Clamps", "build"),
     INTERIOR_MODULES("Interior Storage", "inventory_2"),
-    HARDWARE_FASTENERS("Hardware & Joinery", "build"),
-    LIGHTING_ELECTRICAL("Lighting & Sensors", "lightbulb")
+    LABOUR_SERVICES("Carpentry & Labour", "engineering"),
+
+    // Category aliases for export engines
+    BOARDS("Structural Boards", "dashboard"),
+    ADHESIVES("Glues & Tapes", "science"),
+    HARDWARE("Hardware & Hinges", "build"),
+    HANDLES("Handles & Knobs", "build"),
+    LIGHTING("Lighting & Sensors", "lightbulb"),
+    ACCESSORIES("Interior Accessories", "inventory_2"),
+    LABOUR("Labour & Services", "engineering")
 }
 
 data class BOMItem(
@@ -24,7 +35,9 @@ data class BOMItem(
     val unitCostInr: Double,
     val totalCostInr: Double = unitCostInr * quantity
 ) {
-    // Backward-compatibility properties
+    val details: String get() = dimensionSpec
+    val unitRate: Double get() = unitCostInr
+    val totalCost: Double get() = totalCostInr
     val unitCostUsd: Double get() = unitCostInr
     val totalCostUsd: Double get() = totalCostInr
 }
@@ -42,289 +55,327 @@ data class BOMSummary(
     val totalEdgeBandingMeters: Float,
     val items: List<BOMItem>,
     val totalEstimatedCostInr: Double,
-    val estimatedAssemblyHours: Float
+    val estimatedAssemblyHours: Float,
+    val detailedBOM: DetailedWardrobeBOM
 ) {
-    // Backward-compatibility property
+    val totalCost: Double get() = totalEstimatedCostInr
+    val materialsCost: Double get() = detailedBOM.materialTotal
+    val hardwareCost: Double get() = detailedBOM.hardwareTotal
+    val labourCost: Double get() = detailedBOM.labourCost
     val totalEstimatedCostUsd: Double get() = totalEstimatedCostInr
 
     fun toFormattedMarkdown(unitSystem: UnitSystem = UnitSystem.FEET_INCHES): String {
-        val sb = StringBuilder()
-        sb.appendLine("## Bill of Materials (BOM) — $wardrobeName")
-        sb.appendLine("**Primary Dimensions:** $overallDimensionsFeetInches ($overallDimensionsCm / $overallDimensionsInches)")
-        sb.appendLine("**Material Finish:** $finishName | **Door Style:** $doorStyleName")
-        sb.appendLine("**Volume:** ${String.format(Locale.US, "%.2f", totalVolumeCubicMeters)} m³ | **Estimated Weight:** ${totalWeightKg.toInt()} kg")
-        sb.appendLine("**Sheet Goods Required (4×8 ft):** $totalSheetBoardsRequired boards | **Edge Banding:** ${totalEdgeBandingMeters.toInt()} m")
-        sb.appendLine("**Estimated Total Cost:** ${DimensionFormatter.formatCurrencyINR(totalEstimatedCostInr)} | **Assembly Time:** ${estimatedAssemblyHours} hrs")
-        sb.appendLine()
-        sb.appendLine("| Category | Item | Specifications | Qty | Unit Rate (INR) | Total (INR) |")
-        sb.appendLine("|---|---|---|---|---|---|")
-        items.forEach { item ->
-            sb.appendLine("| ${item.category.title} | ${item.name} | ${item.dimensionSpec} (${item.material}) | ${item.quantity} ${item.unit} | ${DimensionFormatter.formatCurrencyINR(item.unitCostInr)} | ${DimensionFormatter.formatCurrencyINR(item.totalCostInr)} |")
-        }
-        return sb.toString()
+        return detailedBOM.toFormattedMarkdown(unitSystem)
     }
 }
 
+typealias BOMResult = BOMSummary
+
 object BOMCalculator {
 
-    fun calculateBOM(config: WardrobeConfig): BOMSummary {
-        val w = config.widthCm
-        val h = config.heightCm
-        val d = config.depthCm
-        val finish = config.finish
-        val doorStyle = config.doorStyle
+    fun sheetsRequired(areaSqFt: Double): Int {
+        return ceil(areaSqFt / WardrobeCostRates.SHEET_AREA_SQFT).toInt()
+    }
 
+    /**
+     * Calculates default shelf count based on height in feet.
+     */
+    fun getShelfCount(heightFt: Double): Int {
+        return when {
+            heightFt <= 3.0 -> 1
+            heightFt <= 5.0 -> 2
+            heightFt <= 7.0 -> 3
+            else -> 4
+        }
+    }
+
+    /**
+     * Calculates default door/shutter count based on width in feet.
+     */
+    fun getDoorCount(widthFt: Double): Int {
+        return when {
+            widthFt <= 3.0 -> 2
+            widthFt <= 5.0 -> 3
+            widthFt <= 8.0 -> 4
+            else -> 5
+        }
+    }
+
+    /**
+     * Calculates vertical partition mullions based on shutter count:
+     * Upto 2 doors = 0, 3-4 = 1, 5-6 = 2, 7-8 = 3
+     */
+    fun getVerticalPartitions(doors: Int): Int {
+        return when {
+            doors <= 2 -> 0
+            doors <= 4 -> 1
+            doors <= 6 -> 2
+            else -> 3
+        }
+    }
+
+    /**
+     * Calculates soft-close hinges/clamps per door based on height in feet.
+     */
+    fun getClampsPerDoor(heightFt: Double): Int {
+        return when {
+            heightFt <= 3.0 -> 2
+            heightFt <= 4.5 -> 3
+            heightFt <= 6.0 -> 4
+            heightFt <= 8.0 -> 5
+            else -> 6
+        }
+    }
+
+    fun calculateBOM(config: WardrobeConfig): BOMSummary {
+        val widthCm = config.widthCm
+        val heightCm = config.heightCm
+        val depthCm = config.depthCm
+
+        // Convert cm to feet (1 foot = 30.48 cm)
+        val widthFt = widthCm / 30.48
+        val heightFt = heightCm / 30.48
+        val depthFt = depthCm / 30.48
+
+        // Shutters based on width or config override
+        val defaultDoors = getDoorCount(widthFt)
+        val doors = if (config.doorStyle == DoorStyle.OPEN_CONCEPT) 0 else defaultDoors
+
+        // Shelves based on height or config
+        val calculatedShelves = getShelfCount(heightFt)
+        val shelves = if (config.shelvesCount > 0) config.shelvesCount else calculatedShelves
+
+        // Vertical partitions based on door count
+        val verticalPartitions = if (config.doorStyle == DoorStyle.OPEN_CONCEPT) {
+            if (widthFt > 7.0) 2 else if (widthFt > 4.5) 1 else 0
+        } else {
+            getVerticalPartitions(doors)
+        }
+
+        // ---------------- CARCASS BOARD AREAS ----------------
+        val backArea = widthFt * heightFt
+        val sidesArea = 2.0 * depthFt * heightFt
+        val topBottomArea = 2.0 * depthFt * widthFt
+        val shelvesArea = shelves * depthFt * widthFt
+        val verticalPartitionArea = verticalPartitions * depthFt * heightFt
+
+        val carcassBoardArea = backArea + sidesArea + topBottomArea + shelvesArea + verticalPartitionArea
+
+        // ---------------- SHUTTER AREA ----------------
+        val shutterArea = widthFt * heightFt
+
+        // ---------------- BOARD SHEETS ----------------
+        val plywoodSheets = sheetsRequired(carcassBoardArea)
+        val shutterBlockboardSheets = if (doors > 0) sheetsRequired(shutterArea) else 0
+
+        val plywoodPurchasedArea = plywoodSheets * WardrobeCostRates.SHEET_AREA_SQFT
+        val shutterPurchasedArea = shutterBlockboardSheets * WardrobeCostRates.SHEET_AREA_SQFT
+
+        val plywoodCost = plywoodPurchasedArea * WardrobeCostRates.PLYWOOD_RATE_PER_SQFT
+        val shutterBlockboardCost = shutterPurchasedArea * WardrobeCostRates.BLOCKBOARD_RATE_PER_SQFT
+
+        // ---------------- INTERNAL LAMINATE ----------------
+        // Back + sides + top/bottom: one visible side
+        val singleSideCarcassLaminateArea = backArea + sidesArea + topBottomArea
+        // Shelves visible on both sides
+        val shelfLaminateArea = shelvesArea * 2.0
+        // Vertical partitions visible on both sides
+        val verticalPartitionLaminateArea = verticalPartitionArea * 2.0
+
+        val internalLaminateArea = singleSideCarcassLaminateArea + shelfLaminateArea + verticalPartitionLaminateArea
+        val internalLaminateSheets = sheetsRequired(internalLaminateArea)
+        val internalLaminateCost = internalLaminateSheets * WardrobeCostRates.INTERNAL_LAMINATE_RATE_PER_SHEET
+
+        // ---------------- EXTERIOR LAMINATE ----------------
+        // Shutters laminated on both sides
+        val exteriorLaminateArea = if (doors > 0) shutterArea * 2.0 else 0.0
+        val exteriorLaminateSheets = if (doors > 0) sheetsRequired(exteriorLaminateArea) else 0
+        val exteriorLaminateCost = exteriorLaminateSheets * WardrobeCostRates.EXTERNAL_LAMINATE_RATE_PER_SHEET
+
+        // ---------------- FEVICOL MARINE ----------------
+        val totalLaminateSheets = internalLaminateSheets + exteriorLaminateSheets
+        val marineFevicolKg = totalLaminateSheets * WardrobeCostRates.MARINE_FEVI_PER_SHEET_KG
+        val marineFevicolCost = marineFevicolKg * WardrobeCostRates.MARINE_FEVI_RATE_PER_KG
+
+        // ---------------- EDGE BENDING ----------------
+        val shutterWidth = if (doors > 0) widthFt / doors else 0.0
+        // Perimeter of shutters in feet converted to meters (1 ft = 0.3048 m)
+        val shutterEdgeLengthFt = if (doors > 0) doors * 2.0 * (shutterWidth + heightFt) else 0.0
+        val carcassEdgeLengthFt = (2.0 * widthFt) + (4.0 * heightFt) + (shelves * widthFt) + (verticalPartitions * heightFt)
+        val totalEdgeLengthMeters = (shutterEdgeLengthFt + carcassEdgeLengthFt) * 0.3048
+        val edgeRolls = max(1, ceil(totalEdgeLengthMeters / WardrobeCostRates.PVC_EDGE_ROLL_LENGTH_M).toInt())
+        val edgeTapeCost = edgeRolls * WardrobeCostRates.PVC_EDGE_ROLL_RATE
+
+        // ---------------- PROBOND ----------------
+        val probondKg = edgeRolls * 1.0
+        val probondCost = probondKg * WardrobeCostRates.PROBOND_RATE_PER_KG
+
+        // ---------------- CLAMPS / HINGES ----------------
+        val effectiveDoorsForClamps = if (doors > 0) doors else 0
+        val clampsPerDoor = getClampsPerDoor(heightFt)
+        val totalClamps = effectiveDoorsForClamps * clampsPerDoor
+        val clampCost = totalClamps * WardrobeCostRates.CLAMP_RATE_PER_PC
+
+        // Additional Hardware for Drawers, Rails, Lighting, Handles & Organizers
+        val drawerChannelsCost = config.drawersCount * 950.0 // Telescopic soft-close pair per drawer
+        val hangingRodCost = config.hangingRailsCount * 450.0 // Oval chrome rail + brackets
+        val ledLightingCost = when (config.ledLighting) {
+            LedLighting.NONE -> 0.0
+            LedLighting.WARM_AMBIENT -> 2800.0
+            LedLighting.NATURAL_DAYLIGHT -> 2800.0
+            LedLighting.CYAN_HOLOGRAPHIC -> 3200.0
+        }
+
+        // Handles
+        val handleRate = when (config.handleStyle) {
+            "Brushed Brass Profile" -> 550.0
+            "Rose Gold Knob" -> 280.0
+            "Concealed J-Pull" -> 400.0
+            "Brushed Chrome Edge" -> 480.0
+            else -> 350.0
+        }
+        val handlesCount = if (doors > 0) doors else 0
+        val handleCost = handlesCount * handleRate
+
+        // Accessories
+        val mirrorCost = if (config.hasMirrorPanel) 2200.0 else 0.0
+        val shoeRackCost = if (config.hasShoeRack) 1200.0 else 0.0
+        val jewelryTrayCost = if (config.hasJewelryTray) 1850.0 else 0.0
+        val trouserRackCost = if (config.hasTrouserRack) 1450.0 else 0.0
+        val accessoriesCost = mirrorCost + shoeRackCost + jewelryTrayCost + trouserRackCost
+
+        // ---------------- LABOUR & TOTALS ----------------
+        val materialTotal = plywoodCost +
+                shutterBlockboardCost +
+                internalLaminateCost +
+                exteriorLaminateCost +
+                marineFevicolCost +
+                edgeTapeCost +
+                probondCost
+
+        val hardwareTotal = clampCost + drawerChannelsCost + hangingRodCost + ledLightingCost + handleCost + accessoriesCost
+
+        val labourCost = shutterArea * WardrobeCostRates.LABOUR_RATE_PER_SQFT
+
+        // 5% miscellaneous on Material + Hardware + Labour
+        val miscellaneous = (materialTotal + hardwareTotal + labourCost) * WardrobeCostRates.MISC_PERCENT
+
+        val finalCost = materialTotal + hardwareTotal + labourCost + miscellaneous
+
+        // ---------------- ITEMIZED BOM ITEMS ----------------
         val items = mutableListOf<BOMItem>()
 
-        // 1. Carcass Structural Panels (18mm thickness standard)
-        val panelMaterial = if (finish.isWood) {
-            "18mm BWP HDHMR Board (${finish.title} Natural Wood Grain)"
-        } else {
-            "18mm Pre-Laminated HDHMR Board (${finish.title} Matte Finish)"
-        }
-        val backboardMaterial = "6mm Moisture-Resistant BWP Backing Sheet"
-
-        // Side Vertical Gable Panels (2 pcs)
-        val sidePanelAreaM2 = 2 * (h / 100f) * (d / 100f)
-        val sidePanelInr = ((h * d / 10000f) * 2250.0).coerceAtLeast(1800.0)
-        val hFtIn = DimensionFormatter.formatLength(h, UnitSystem.FEET_INCHES, compact = true)
-        val dFtIn = DimensionFormatter.formatLength(d, UnitSystem.FEET_INCHES, compact = true)
-        val wFtIn = DimensionFormatter.formatLength(w, UnitSystem.FEET_INCHES, compact = true)
-
+        // 1. Carcass Plywood
         items.add(
             BOMItem(
-                id = "carcass_sides",
+                id = "carcass_plywood",
                 category = BOMCategory.CARCASS_PANELS,
-                name = "Vertical Side Gables (Left/Right)",
-                dimensionSpec = "2 pcs @ $hFtIn × $dFtIn (${h.toInt()} × ${d.toInt()} cm)",
-                quantity = 2,
-                unit = "pcs",
-                material = panelMaterial,
-                unitCostInr = sidePanelInr
+                name = "18mm BWP/MR Plywood (Carcass & Shelves)",
+                dimensionSpec = "$plywoodSheets Sheets (8×4 ft) • ${String.format(Locale.US, "%.1f", carcassBoardArea)} sq.ft",
+                quantity = plywoodSheets,
+                unit = "sheets",
+                material = "18mm Commercial / BWP Plywood",
+                unitCostInr = WardrobeCostRates.SHEET_AREA_SQFT * WardrobeCostRates.PLYWOOD_RATE_PER_SQFT
             )
         )
 
-        // Top & Bottom Deck Panels (2 pcs)
-        val internalWidth = max(20f, w - 3.6f)
-        val deckInr = ((internalWidth * d / 10000f) * 2100.0).coerceAtLeast(1650.0)
-        val internalWFtIn = DimensionFormatter.formatLength(internalWidth, UnitSystem.FEET_INCHES, compact = true)
-
-        items.add(
-            BOMItem(
-                id = "carcass_top_bottom",
-                category = BOMCategory.CARCASS_PANELS,
-                name = "Top Crown & Bottom Base Decks",
-                dimensionSpec = "2 pcs @ $internalWFtIn × $dFtIn (${internalWidth.toInt()} × ${d.toInt()} cm)",
-                quantity = 2,
-                unit = "pcs",
-                material = panelMaterial,
-                unitCostInr = deckInr
-            )
-        )
-
-        // Internal Dividers (if w > 130cm -> 1 divider, if w > 230cm -> 2 dividers)
-        val dividerCount = when {
-            w > 230f -> 2
-            w > 130f -> 1
-            else -> 0
-        }
-        if (dividerCount > 0) {
-            val dividerHeight = max(20f, h - 3.6f)
-            val dividerDepth = max(20f, d - 2f)
-            val divInr = ((dividerHeight * dividerDepth / 10000f) * 1950.0).coerceAtLeast(1450.0)
-            val divHFtIn = DimensionFormatter.formatLength(dividerHeight, UnitSystem.FEET_INCHES, compact = true)
-            val divDFtIn = DimensionFormatter.formatLength(dividerDepth, UnitSystem.FEET_INCHES, compact = true)
-
+        // 2. Shutter Blockboard
+        if (doors > 0) {
             items.add(
                 BOMItem(
-                    id = "carcass_dividers",
-                    category = BOMCategory.CARCASS_PANELS,
-                    name = "Vertical Internal Partition Mullions",
-                    dimensionSpec = "$dividerCount pcs @ $divHFtIn × $divDFtIn (${dividerHeight.toInt()} × ${dividerDepth.toInt()} cm)",
-                    quantity = dividerCount,
-                    unit = "pcs",
-                    material = panelMaterial,
-                    unitCostInr = divInr
-                )
-            )
-        }
-
-        // Backing Board (6mm HDF / BWP Ply)
-        val backInr = ((h * w / 10000f) * 1150.0).coerceAtLeast(950.0)
-        items.add(
-            BOMItem(
-                id = "carcass_back",
-                category = BOMCategory.CARCASS_PANELS,
-                name = "Grooved Rear Backing Board",
-                dimensionSpec = "1 pc @ $hFtIn × $wFtIn (${(h - 1f).toInt()} × ${(w - 1f).toInt()} cm)",
-                quantity = 1,
-                unit = "pc",
-                material = backboardMaterial,
-                unitCostInr = backInr
-            )
-        )
-
-        // Base Plinth / Toe Kick
-        items.add(
-            BOMItem(
-                id = "carcass_plinth",
-                category = BOMCategory.CARCASS_PANELS,
-                name = "Recessed Toe-Kick Plinth Base",
-                dimensionSpec = "1 set @ $wFtIn × 3″ (${w.toInt()} × 8 cm)",
-                quantity = 1,
-                unit = "set",
-                material = "18mm Waterproof Moisture-Barrier Plinth",
-                unitCostInr = 1450.0
-            )
-        )
-
-        // 2. Doors & Facades
-        when (doorStyle) {
-            DoorStyle.DUAL_HINGED, DoorStyle.HINGED_DOOR -> {
-                val doorCount = if (w > 200f) 4 else 2
-                val doorLeafWidth = (w - 0.4f * (doorCount + 1)) / doorCount
-                val doorLeafHeight = h - 8f
-                val doorMat = if (finish == FinishType.SMOKED_GLASS) {
-                    "4mm Smoked Tempered Safety Glass with Anodized Frame"
-                } else {
-                    "18mm ${finish.title} Custom Shaker Facade Leaf"
-                }
-                val doorUnitCostInr = if (finish == FinishType.SMOKED_GLASS) 7200.0 else 3850.0
-                val dLeafWFtIn = DimensionFormatter.formatLength(doorLeafWidth, UnitSystem.FEET_INCHES, compact = true)
-                val dLeafHFtIn = DimensionFormatter.formatLength(doorLeafHeight, UnitSystem.FEET_INCHES, compact = true)
-
-                items.add(
-                    BOMItem(
-                        id = "facade_doors",
-                        category = BOMCategory.DOORS_FACADES,
-                        name = "Hinged Door Leaf Panels",
-                        dimensionSpec = "$doorCount pcs @ $dLeafWFtIn × $dLeafHFtIn (${doorLeafWidth.toInt()} × ${doorLeafHeight.toInt()} cm)",
-                        quantity = doorCount,
-                        unit = "pcs",
-                        material = doorMat,
-                        unitCostInr = doorUnitCostInr
-                    )
-                )
-            }
-            DoorStyle.SLIDING_BYPASS, DoorStyle.SLIDING_DOOR, DoorStyle.MIRROR_SLIDING_DOOR -> {
-                val slidingCount = if (w > 220f) 3 else 2
-                val doorLeafWidth = (w / slidingCount) + 4f
-                val doorLeafHeight = h - 10f
-                val slidingMat = if (finish == FinishType.SMOKED_GLASS || doorStyle == DoorStyle.MIRROR_SLIDING_DOOR) {
-                    "4mm Smoked/Mirrored Glass with Anodized Aluminum Sash"
-                } else {
-                    "18mm ${finish.title} Sliding Panel with Aluminum Integrated Profile"
-                }
-                val sLeafWFtIn = DimensionFormatter.formatLength(doorLeafWidth, UnitSystem.FEET_INCHES, compact = true)
-                val sLeafHFtIn = DimensionFormatter.formatLength(doorLeafHeight, UnitSystem.FEET_INCHES, compact = true)
-
-                items.add(
-                    BOMItem(
-                        id = "facade_sliding",
-                        category = BOMCategory.DOORS_FACADES,
-                        name = "Heavy-Duty Bypass Sliding Door Sashes",
-                        dimensionSpec = "$slidingCount pcs @ $sLeafWFtIn × $sLeafHFtIn (${doorLeafWidth.toInt()} × ${doorLeafHeight.toInt()} cm)",
-                        quantity = slidingCount,
-                        unit = "pcs",
-                        material = slidingMat,
-                        unitCostInr = 6800.0
-                    )
-                )
-                items.add(
-                    BOMItem(
-                        id = "facade_track",
-                        category = BOMCategory.DOORS_FACADES,
-                        name = "Top & Bottom Aluminum Sliding Track Set",
-                        dimensionSpec = "1 set @ $wFtIn (${w.toInt()} cm) with silent damper rollers",
-                        quantity = 1,
-                        unit = "set",
-                        material = "Extruded Aircraft Aluminum (Anodized)",
-                        unitCostInr = 5200.0
-                    )
-                )
-            }
-            DoorStyle.ACCORDION_BI_FOLD -> {
-                val leafW = w / 4f
-                val leafH = h - 8f
-                val lWFtIn = DimensionFormatter.formatLength(leafW, UnitSystem.FEET_INCHES, compact = true)
-                val lHFtIn = DimensionFormatter.formatLength(leafH, UnitSystem.FEET_INCHES, compact = true)
-                items.add(
-                    BOMItem(
-                        id = "facade_bifold",
-                        category = BOMCategory.DOORS_FACADES,
-                        name = "Flush Bi-Fold Accordion Leaves & Overhead Rail",
-                        dimensionSpec = "4 leaves @ $lWFtIn × $lHFtIn (${leafW.toInt()} × ${leafH.toInt()} cm)",
-                        quantity = 4,
-                        unit = "leaves",
-                        material = "18mm ${finish.title} with Flush Center Hinges",
-                        unitCostInr = 3950.0
-                    )
-                )
-            }
-            DoorStyle.OPEN_CONCEPT -> {
-                items.add(
-                    BOMItem(
-                        id = "facade_open",
-                        category = BOMCategory.DOORS_FACADES,
-                        name = "Architectural Open Face Finishing Trim",
-                        dimensionSpec = "Perimeter bevel @ $wFtIn × $hFtIn (${w.toInt()} × ${h.toInt()} cm)",
-                        quantity = 1,
-                        unit = "set",
-                        material = "2mm Impact-Resistant ABS Edge Profile",
-                        unitCostInr = 1800.0
-                    )
-                )
-            }
-        }
-
-        // Full-Length Mirror Option
-        if (config.hasMirrorPanel) {
-            val mirHFtIn = DimensionFormatter.formatLength(h - 45f, UnitSystem.FEET_INCHES, compact = true)
-            items.add(
-                BOMItem(
-                    id = "facade_mirror",
+                    id = "shutter_blockboard",
                     category = BOMCategory.DOORS_FACADES,
-                    name = "Full-Length Safety-Backed Float Mirror",
-                    dimensionSpec = "1 pc @ 1′ 10″ × $mirHFtIn (55 × ${(h - 45).toInt()} cm, 4mm)",
-                    quantity = 1,
-                    unit = "pc",
-                    material = "Silver Float Mirror with Polished Beveled Edges",
-                    unitCostInr = 3800.0
+                    name = "18mm Pinewood Blockboard (Shutter Leaves)",
+                    dimensionSpec = "$shutterBlockboardSheets Sheets (8×4 ft) • $doors Shutters (${String.format(Locale.US, "%.1f", shutterArea)} sq.ft)",
+                    quantity = shutterBlockboardSheets,
+                    unit = "sheets",
+                    material = "18mm Grade-I Blockboard (Anti-Warping)",
+                    unitCostInr = WardrobeCostRates.SHEET_AREA_SQFT * WardrobeCostRates.BLOCKBOARD_RATE_PER_SQFT
                 )
             )
         }
 
-        // 3. Interior Storage Modules
-        val compartmentWidth = if (dividerCount > 0) internalWidth / (dividerCount + 1) else internalWidth
-        val compWFtIn = DimensionFormatter.formatLength(compartmentWidth, UnitSystem.FEET_INCHES, compact = true)
-        val compDFtIn = DimensionFormatter.formatLength(d - 4f, UnitSystem.FEET_INCHES, compact = true)
+        // 3. Laminates
+        items.add(
+            BOMItem(
+                id = "internal_laminate",
+                category = BOMCategory.LAMINATES,
+                name = "0.8mm Internal Liner Off-White Laminate",
+                dimensionSpec = "$internalLaminateSheets Sheets (8×4 ft) • ${String.format(Locale.US, "%.1f", internalLaminateArea)} sq.ft",
+                quantity = internalLaminateSheets,
+                unit = "sheets",
+                material = "0.8mm Matte Liner Sheet",
+                unitCostInr = WardrobeCostRates.INTERNAL_LAMINATE_RATE_PER_SHEET
+            )
+        )
 
-        if (config.shelvesCount > 0) {
+        if (doors > 0) {
             items.add(
                 BOMItem(
-                    id = "interior_shelves",
-                    category = BOMCategory.INTERIOR_MODULES,
-                    name = "Adjustable Internal Shelf Boards",
-                    dimensionSpec = "${config.shelvesCount} pcs @ $compWFtIn × $compDFtIn (${compartmentWidth.toInt()} × ${(d - 4).toInt()} cm)",
-                    quantity = config.shelvesCount,
+                    id = "external_laminate",
+                    category = BOMCategory.LAMINATES,
+                    name = "1.0mm Exterior Decorative Texture Laminate",
+                    dimensionSpec = "$exteriorLaminateSheets Sheets (8×4 ft) • ${config.finish.title}",
+                    quantity = exteriorLaminateSheets,
+                    unit = "sheets",
+                    material = "1.0mm Premium Suede/Woodgrain Finish",
+                    unitCostInr = WardrobeCostRates.EXTERNAL_LAMINATE_RATE_PER_SHEET
+                )
+            )
+        }
+
+        // 4. Consumables
+        items.add(
+            BOMItem(
+                id = "marine_fevicol",
+                category = BOMCategory.CONSUMABLES,
+                name = "Fevicol Marine Waterproof Adhesive",
+                dimensionSpec = "${String.format(Locale.US, "%.2f", marineFevicolKg)} kg (${WardrobeCostRates.MARINE_FEVI_PER_SHEET_KG} kg/sheet)",
+                quantity = ceil(marineFevicolKg).toInt(),
+                unit = "kg",
+                material = "Waterproof Polyvinyl Acetate Emulsion",
+                unitCostInr = WardrobeCostRates.MARINE_FEVI_RATE_PER_KG
+            )
+        )
+
+        items.add(
+            BOMItem(
+                id = "pvc_edge_band",
+                category = BOMCategory.CONSUMABLES,
+                name = "2mm PVC Edge Bending Tape",
+                dimensionSpec = "$edgeRolls Rolls (${String.format(Locale.US, "%.1f", totalEdgeLengthMeters)} m total)",
+                quantity = edgeRolls,
+                unit = "rolls",
+                material = "2mm High-Impact PVC Profile",
+                unitCostInr = WardrobeCostRates.PVC_EDGE_ROLL_RATE
+            )
+        )
+
+        items.add(
+            BOMItem(
+                id = "probond_adhesive",
+                category = BOMCategory.CONSUMABLES,
+                name = "Fevicol Probond (PVC Edge Adhesive)",
+                dimensionSpec = "${String.format(Locale.US, "%.1f", probondKg)} kg (1 kg per roll)",
+                quantity = ceil(probondKg).toInt(),
+                unit = "kg",
+                material = "Synthetic Rubber Adhesive",
+                unitCostInr = WardrobeCostRates.PROBOND_RATE_PER_KG
+            )
+        )
+
+        // 5. Hardware
+        if (totalClamps > 0) {
+            items.add(
+                BOMItem(
+                    id = "hardware_clamps",
+                    category = BOMCategory.HARDWARE_FASTENERS,
+                    name = "Soft-Close Concealed Hinges (Clamps)",
+                    dimensionSpec = "$totalClamps pcs ($clampsPerDoor clamps per shutter)",
+                    quantity = totalClamps,
                     unit = "pcs",
-                    material = panelMaterial,
-                    unitCostInr = 1250.0
-                )
-            )
-        }
-
-        if (config.hangingRailsCount > 0) {
-            items.add(
-                BOMItem(
-                    id = "interior_rails",
-                    category = BOMCategory.INTERIOR_MODULES,
-                    name = "Heavy-Duty Oval Clothes Hanging Rails",
-                    dimensionSpec = "${config.hangingRailsCount} rods @ $compWFtIn (${compartmentWidth.toInt()} cm) with end-brackets",
-                    quantity = config.hangingRailsCount,
-                    unit = "rods",
-                    material = "Brushed Chrome Steel (30×15mm Oval)",
-                    unitCostInr = 950.0
+                    material = "Nickel Plated Hydraulic 3D Hinge",
+                    unitCostInr = WardrobeCostRates.CLAMP_RATE_PER_PC
                 )
             )
         }
@@ -332,146 +383,217 @@ object BOMCalculator {
         if (config.drawersCount > 0) {
             items.add(
                 BOMItem(
-                    id = "interior_drawers",
+                    id = "hardware_drawers",
                     category = BOMCategory.INTERIOR_MODULES,
-                    name = "Modular Soft-Close Drawer Boxes",
-                    dimensionSpec = "${config.drawersCount} boxes @ $compWFtIn × ${(d - 10).toInt()} cm (7″ depth)",
+                    name = "Modular Soft-Close Drawer Boxes & Telescopic Channels",
+                    dimensionSpec = "${config.drawersCount} sets with 45kg load-rated ball bearing sliders",
                     quantity = config.drawersCount,
-                    unit = "boxes",
-                    material = "15mm Marine Plywood with Telescopic Soft-Close Channels",
-                    unitCostInr = 2950.0
+                    unit = "sets",
+                    material = "15mm Ply Box + Zinc Plated Telescopic Slides",
+                    unitCostInr = 950.0
                 )
             )
         }
 
-        // 4. Hardware & Fasteners
-        val hingeCount = when (doorStyle) {
-            DoorStyle.DUAL_HINGED -> if (w > 200f) 16 else 8
-            DoorStyle.ACCORDION_BI_FOLD -> 12
-            else -> 0
-        }
-        if (hingeCount > 0) {
+        if (config.hangingRailsCount > 0) {
             items.add(
                 BOMItem(
-                    id = "hardware_hinges",
-                    category = BOMCategory.HARDWARE_FASTENERS,
-                    name = "110° Clip-On Soft-Close Concealed Hinges (Hafele/Ebco)",
-                    dimensionSpec = "$hingeCount pcs (35mm cup depth with mounting plates)",
-                    quantity = hingeCount,
-                    unit = "pcs",
-                    material = "Cold-Rolled Nickel Plated Steel",
-                    unitCostInr = 340.0
+                    id = "hardware_hanging_rails",
+                    category = BOMCategory.INTERIOR_MODULES,
+                    name = "Heavy-Duty Oval Wardrobe Hanging Rods",
+                    dimensionSpec = "${config.hangingRailsCount} rods with die-cast end sockets",
+                    quantity = config.hangingRailsCount,
+                    unit = "rods",
+                    material = "Chrome Plated Steel (30×15mm)",
+                    unitCostInr = 450.0
                 )
             )
         }
 
-        // Cam locks & Dowels
-        val connectorSets = 16 + (dividerCount * 8) + (config.shelvesCount * 2)
-        items.add(
-            BOMItem(
-                id = "hardware_camlocks",
-                category = BOMCategory.HARDWARE_FASTENERS,
-                name = "Minifix Cam & Expansion Dowel Joinery Sets",
-                dimensionSpec = "$connectorSets sets (15mm zinc cam + case-hardened dowel)",
-                quantity = connectorSets,
-                unit = "sets",
-                material = "Zinc Alloy & High-Tensile Steel",
-                unitCostInr = 65.0
-            )
-        )
-
-        // Shelf Pins
-        val pinCount = config.shelvesCount * 4
-        if (pinCount > 0) {
-            items.add(
-                BOMItem(
-                    id = "hardware_pins",
-                    category = BOMCategory.HARDWARE_FASTENERS,
-                    name = "Anti-Tip Nickel Shelf Support Pins",
-                    dimensionSpec = "$pinCount pcs (5mm shaft with silicone sleeve)",
-                    quantity = pinCount,
-                    unit = "pcs",
-                    material = "Nickel-Plated Steel with Rubber Grip",
-                    unitCostInr = 28.0
-                )
-            )
-        }
-
-        // Wall Anchoring Anti-Tip Safety Kit
-        items.add(
-            BOMItem(
-                id = "hardware_safety_anchor",
-                category = BOMCategory.HARDWARE_FASTENERS,
-                name = "Heavy-Duty Wall Anchor Anti-Tip Safety Brackets",
-                dimensionSpec = "2 heavy brackets with expansion fastener anchors",
-                quantity = 2,
-                unit = "sets",
-                material = "3mm Galvanized Carbon Steel",
-                unitCostInr = 650.0
-            )
-        )
-
-        // 5. Lighting & Sensors
         if (config.ledLighting != LedLighting.NONE) {
-            val stripMeters = ceil((h * 2 + w) / 100f).toInt()
-            val stripFt = (stripMeters * 3.28f).roundToInt()
             items.add(
                 BOMItem(
-                    id = "elec_led_strip",
-                    category = BOMCategory.LIGHTING_ELECTRICAL,
-                    name = "Recessed Aluminum 45° LED Profile & COB Strip",
-                    dimensionSpec = "$stripMeters meters ($stripFt ft) — ${config.ledLighting.title} (${config.ledLighting.tempKelvin})",
-                    quantity = stripMeters,
-                    unit = "m",
-                    material = "High-CRI 90+ 24V COB Dotless LED + Opal Diffuser",
-                    unitCostInr = 1150.0
-                )
-            )
-            items.add(
-                BOMItem(
-                    id = "elec_driver",
-                    category = BOMCategory.LIGHTING_ELECTRICAL,
-                    name = "24V 60W Slim Driver & Proximity Door Sensor",
-                    dimensionSpec = "1 unit auto-on when door opens",
+                    id = "lighting_led",
+                    category = BOMCategory.HARDWARE_FASTENERS,
+                    name = "Integrated LED Strip & Smart Sensor Driver",
+                    dimensionSpec = "45° Aluminum profile + 24V COB Strip (${config.ledLighting.title})",
                     quantity = 1,
                     unit = "set",
-                    material = "ISI Certified Constant Voltage Power Supply",
-                    unitCostInr = 2650.0
+                    material = "Opal Diffuser + ISI Power Supply",
+                    unitCostInr = 2800.0
                 )
             )
         }
 
-        // Calculations for Total Summary in INR
-        val totalCostInr = items.sumOf { it.totalCostInr }
-        val volumeM3 = config.volumeCubicMeters
-        val totalWeightKg = (volumeM3 * 220f) + (config.drawersCount * 6f) + (if (config.hasMirrorPanel) 14f else 0f)
+        if (handlesCount > 0) {
+            items.add(
+                BOMItem(
+                    id = "hardware_handles",
+                    category = BOMCategory.HARDWARE_FASTENERS,
+                    name = "Designer Handles (${config.handleStyle})",
+                    dimensionSpec = "$handlesCount pcs @ ₹${handleRate.toInt()}/pc",
+                    quantity = handlesCount,
+                    unit = "pcs",
+                    material = "Solid Brass / Anodized Aluminum Profile",
+                    unitCostInr = handleRate
+                )
+            )
+        }
 
-        // Total sheet boards calculation (standard 2440 x 1220 mm / 8x4 ft = 2.976 m²)
-        val totalCarcassAreaM2 = sidePanelAreaM2 + (2 * internalWidth * d / 10000f) +
-                (dividerCount * (h - 3.6f) * (d - 2f) / 10000f) +
-                (config.shelvesCount * compartmentWidth * (d - 4) / 10000f)
-        val sheetBoardsNeeded = max(2, ceil((totalCarcassAreaM2 * 1.15f) / 2.97f).toInt())
-        val edgeBandingMeters = ((h * 4 + w * 4 + config.shelvesCount * compartmentWidth * 2) / 100f) * 1.1f
-        val assemblyHours = 2.5f + (dividerCount * 0.8f) + (config.drawersCount * 0.5f) + (config.shelvesCount * 0.2f)
+        if (config.hasMirrorPanel) {
+            items.add(
+                BOMItem(
+                    id = "accessory_mirror",
+                    category = BOMCategory.INTERIOR_MODULES,
+                    name = "Full-Height Dressing Mirror Shutter Panel",
+                    dimensionSpec = "5mm Beveled Float Mirror with safety vinyl backing",
+                    quantity = 1,
+                    unit = "panel",
+                    material = "Saint-Gobain / Modiguard 5mm Extra-Clear Mirror",
+                    unitCostInr = 2200.0
+                )
+            )
+        }
 
-        val ftInDimensions = DimensionFormatter.formatDimensions(w, h, d, UnitSystem.FEET_INCHES, compact = false)
-        val inchDimensions = DimensionFormatter.formatDimensions(w, h, d, UnitSystem.INCHES, compact = false)
-        val cmDimensions = "${w.toInt()} W × ${h.toInt()} H × ${d.toInt()} D cm"
+        if (config.hasJewelryTray) {
+            items.add(
+                BOMItem(
+                    id = "accessory_jewelry_tray",
+                    category = BOMCategory.INTERIOR_MODULES,
+                    name = "Modular Velvet Jewelry & Watch Organizer Tray",
+                    dimensionSpec = "Multi-compartment velvet lined divider with ring rolls",
+                    quantity = 1,
+                    unit = "tray",
+                    material = "Handcrafted MDF with Plush Beige/Grey Velvet",
+                    unitCostInr = 1850.0
+                )
+            )
+        }
+
+        if (config.hasTrouserRack) {
+            items.add(
+                BOMItem(
+                    id = "accessory_trouser_rack",
+                    category = BOMCategory.INTERIOR_MODULES,
+                    name = "Telescopic Pull-Out Trouser & Tie Rack",
+                    dimensionSpec = "9-arm anti-slip rubber padded hanging bars",
+                    quantity = 1,
+                    unit = "rack",
+                    material = "Chrome Steel Rails + Soft-Close Damper",
+                    unitCostInr = 1450.0
+                )
+            )
+        }
+
+        if (config.hasShoeRack) {
+            items.add(
+                BOMItem(
+                    id = "accessory_shoe_rack",
+                    category = BOMCategory.INTERIOR_MODULES,
+                    name = "Slanted Metallic Shoe Organizer Tier",
+                    dimensionSpec = "Dual-tier ventilated mesh wire racks",
+                    quantity = 1,
+                    unit = "tier",
+                    material = "Powder-Coated Anthracite Steel Wire",
+                    unitCostInr = 1200.0
+                )
+            )
+        }
+
+        // 6. Skilled Labour
+        items.add(
+            BOMItem(
+                id = "labour_carpentry",
+                category = BOMCategory.LABOUR_SERVICES,
+                name = "Skilled Carpentry & On-Site Installation",
+                dimensionSpec = "${String.format(Locale.US, "%.1f", shutterArea)} sq.ft @ ₹${WardrobeCostRates.LABOUR_RATE_PER_SQFT.toInt()}/sq.ft",
+                quantity = ceil(shutterArea).toInt(),
+                unit = "sq.ft",
+                material = "Master Carpentry, Levelling & Finishing",
+                unitCostInr = WardrobeCostRates.LABOUR_RATE_PER_SQFT
+            )
+        )
+
+        val totalWeightKg = (plywoodSheets * 28f) + (shutterBlockboardSheets * 24f) + (config.drawersCount * 6f)
+        val assemblyHours = 3.0f + (doors * 0.75f) + (config.drawersCount * 0.5f) + (shelves * 0.2f)
+
+        val detailedBOM = DetailedWardrobeBOM(
+            widthFt = widthFt,
+            heightFt = heightFt,
+            depthFt = depthFt,
+            widthCm = widthCm,
+            heightCm = heightCm,
+            depthCm = depthCm,
+            shuttersCount = doors,
+            shelvesCount = shelves,
+            verticalPartitionsCount = verticalPartitions,
+            drawersCount = config.drawersCount,
+            hangingRailsCount = config.hangingRailsCount,
+            backAreaSqFt = backArea,
+            sidesAreaSqFt = sidesArea,
+            topBottomAreaSqFt = topBottomArea,
+            shelvesAreaSqFt = shelvesArea,
+            verticalPartitionAreaSqFt = verticalPartitionArea,
+            carcassBoardAreaSqFt = carcassBoardArea,
+            shutterAreaSqFt = shutterArea,
+            carcassPlywoodSheets = plywoodSheets,
+            carcassPlywoodPurchasedSqFt = plywoodPurchasedArea,
+            carcassPlywoodCost = plywoodCost,
+            shutterBlockboardSheets = shutterBlockboardSheets,
+            shutterPurchasedSqFt = shutterPurchasedArea,
+            shutterBlockboardCost = shutterBlockboardCost,
+            internalLaminateAreaSqFt = internalLaminateArea,
+            internalLaminateSheets = internalLaminateSheets,
+            internalLaminateCost = internalLaminateCost,
+            exteriorLaminateAreaSqFt = exteriorLaminateArea,
+            exteriorLaminateSheets = exteriorLaminateSheets,
+            exteriorLaminateCost = exteriorLaminateCost,
+            totalLaminateSheets = totalLaminateSheets,
+            marineFevicolKg = marineFevicolKg,
+            marineFevicolCost = marineFevicolCost,
+            shutterEdgeLengthM = totalEdgeLengthMeters,
+            pvcEdgeRolls = edgeRolls,
+            pvcEdgeTapeCost = edgeTapeCost,
+            probondKg = probondKg,
+            probondCost = probondCost,
+            clampsPerDoor = clampsPerDoor,
+            totalClamps = totalClamps,
+            clampCost = clampCost,
+            handlesCount = handlesCount,
+            handleCost = handleCost,
+            drawerChannelsCost = drawerChannelsCost,
+            hangingRodCost = hangingRodCost,
+            ledLightingCost = ledLightingCost,
+            accessoriesCost = accessoriesCost,
+            materialTotal = materialTotal,
+            hardwareTotal = hardwareTotal,
+            labourCost = labourCost,
+            miscellaneousCost = miscellaneous,
+            finalCost = finalCost,
+            totalWeightKg = totalWeightKg,
+            estimatedAssemblyHours = assemblyHours,
+            items = items
+        )
+
+        val ftInDimensions = DimensionFormatter.formatDimensions(widthCm, heightCm, depthCm, UnitSystem.FEET_INCHES, compact = false)
+        val inchDimensions = DimensionFormatter.formatDimensions(widthCm, heightCm, depthCm, UnitSystem.INCHES, compact = false)
+        val cmDimensions = "${widthCm.toInt()} W × ${heightCm.toInt()} H × ${depthCm.toInt()} D cm"
 
         return BOMSummary(
             wardrobeName = config.name,
             overallDimensionsFeetInches = ftInDimensions,
             overallDimensionsInches = inchDimensions,
             overallDimensionsCm = cmDimensions,
-            finishName = finish.title,
-            doorStyleName = doorStyle.title,
-            totalVolumeCubicMeters = volumeM3,
+            finishName = config.finish.title,
+            doorStyleName = config.doorStyle.title,
+            totalVolumeCubicMeters = config.volumeCubicMeters,
             totalWeightKg = totalWeightKg,
-            totalSheetBoardsRequired = sheetBoardsNeeded,
-            totalEdgeBandingMeters = edgeBandingMeters,
+            totalSheetBoardsRequired = plywoodSheets + shutterBlockboardSheets,
+            totalEdgeBandingMeters = totalEdgeLengthMeters.toFloat(),
             items = items,
-            totalEstimatedCostInr = totalCostInr,
-            estimatedAssemblyHours = assemblyHours
+            totalEstimatedCostInr = finalCost,
+            estimatedAssemblyHours = assemblyHours,
+            detailedBOM = detailedBOM
         )
     }
 }

@@ -67,7 +67,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.DimensionFormatter
 import com.example.model.RoomMeasurement
+import com.example.model.UnitSystem
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.CyanPrimary
 import com.example.ui.theme.EmeraldLaser
@@ -91,6 +93,8 @@ fun ARScanScreen(
     onCloseScan: () -> Unit,
     onScanReady: () -> Unit,
     onGenerateCustomWardrobe: (widthM: Float, heightM: Float, depthM: Float) -> Unit,
+    unitSystem: UnitSystem = UnitSystem.FEET_INCHES,
+    onToggleUnit: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var wallWidthM by remember { mutableFloatStateOf(roomMeasurement.detectedWallWidthM) }
@@ -117,12 +121,12 @@ fun ARScanScreen(
             .fillMaxSize()
             .testTag("ar_scan_screen")
     ) {
-        // 1. Top Controls Bar: [Close] [Interactive Laser Measurement] [Torch]
+        // 1. Top Controls Bar: [Close] [Interactive Laser Measurement] [Unit Switcher] [Torch]
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -147,39 +151,63 @@ fun ARScanScreen(
                     .clip(CircleShape)
                     .background(Color(0xCC0F172A))
                     .border(1.dp, Color(0x3338BDF8), CircleShape)
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Default.Straighten,
                         contentDescription = "Laser Measure",
                         tint = CyanNeon,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Area Selection & Sizing",
                         color = TextPrimary,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
             }
 
-            IconButton(
-                onClick = onToggleTorch,
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(Color(0x88000000))
-                    .testTag("torch_button")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                    contentDescription = "Flashlight",
-                    tint = if (isTorchOn) CyanNeon else TextPrimary,
-                    modifier = Modifier.size(20.dp)
-                )
+                // Unit Switcher Button
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(CyanPrimary.copy(alpha = 0.2f))
+                        .border(1.dp, CyanNeon, CircleShape)
+                        .clickable { onToggleUnit() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .testTag("scan_unit_toggle_btn"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "📐 ${unitSystem.shortLabel}",
+                        color = CyanNeon,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                IconButton(
+                    onClick = onToggleTorch,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x88000000))
+                        .testTag("torch_button")
+                ) {
+                    Icon(
+                        imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                        contentDescription = "Flashlight",
+                        tint = if (isTorchOn) CyanNeon else TextPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
 
@@ -290,6 +318,12 @@ fun ARScanScreen(
                 .padding(top = 90.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            val widthFormatted = DimensionFormatter.formatLength(wallWidthM * 100f, unitSystem, compact = true)
+            val heightFormatted = DimensionFormatter.formatLength(wallHeightM * 100f, unitSystem, compact = true)
+            val secondaryDims = if (unitSystem != UnitSystem.CENTIMETERS) {
+                "(${(wallWidthM * 100).roundToInt()} × ${(wallHeightM * 100).roundToInt()} cm)"
+            } else ""
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -299,9 +333,9 @@ fun ARScanScreen(
                     .padding(horizontal = 14.dp, vertical = 6.dp)
             ) {
                 Text(
-                    text = "↔ Width: ${(wallWidthM * 100).roundToInt()} cm  •  ↕ Height: ${(wallHeightM * 100).roundToInt()} cm",
+                    text = "↔ Width: $widthFormatted  •  ↕ Height: $heightFormatted $secondaryDims",
                     color = TextPrimary,
-                    fontSize = 13.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -329,13 +363,15 @@ fun ARScanScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 listOf(
-                    "Compact (160 cm)" to 1.60f,
-                    "2-Door (200 cm)" to 2.00f,
-                    "Standard (240 cm)" to 2.40f,
-                    "Master (280 cm)" to 2.80f,
-                    "Wide Wall (320 cm)" to 3.20f
+                    "Compact" to 1.60f,
+                    "2-Door" to 2.00f,
+                    "Standard" to 2.40f,
+                    "Master" to 2.80f,
+                    "Wide Wall" to 3.20f
                 ).forEach { (label, presetW) ->
                     val isSelected = (wallWidthM * 100).roundToInt() == (presetW * 100).roundToInt()
+                    val presetDimStr = DimensionFormatter.formatLength(presetW * 100f, unitSystem, compact = true)
+                    val fullPresetLabel = "$label ($presetDimStr)"
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
@@ -349,7 +385,7 @@ fun ARScanScreen(
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = label,
+                            text = fullPresetLabel,
                             color = if (isSelected) CyanNeon else TextPrimary,
                             fontSize = 12.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
@@ -392,7 +428,7 @@ fun ARScanScreen(
                         }
 
                         Text(
-                            text = "${String.format("%.2f", usableAreaSqm)} m² area",
+                            text = "${DimensionFormatter.formatArea(usableAreaSqm, unitSystem)} area",
                             color = CyanNeon,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
@@ -417,12 +453,21 @@ fun ARScanScreen(
                                 ) {
                                     Icon(Icons.Default.Remove, contentDescription = "Minus", tint = TextPrimary, modifier = Modifier.size(16.dp))
                                 }
-                                Text(
-                                    text = "${(wallWidthM * 100).roundToInt()} cm",
-                                    color = TextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = DimensionFormatter.formatLength(wallWidthM * 100f, unitSystem, compact = true),
+                                        color = TextPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    if (unitSystem != UnitSystem.CENTIMETERS) {
+                                        Text(
+                                            text = "${(wallWidthM * 100).roundToInt()} cm",
+                                            color = TextMuted,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
                                 IconButton(
                                     onClick = { wallWidthM = (wallWidthM + 0.10f).coerceIn(1.0f, 4.5f) },
                                     modifier = Modifier.size(28.dp)
@@ -442,12 +487,21 @@ fun ARScanScreen(
                                 ) {
                                     Icon(Icons.Default.Remove, contentDescription = "Minus", tint = TextPrimary, modifier = Modifier.size(16.dp))
                                 }
-                                Text(
-                                    text = "${(wallHeightM * 100).roundToInt()} cm",
-                                    color = TextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = DimensionFormatter.formatLength(wallHeightM * 100f, unitSystem, compact = true),
+                                        color = TextPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    if (unitSystem != UnitSystem.CENTIMETERS) {
+                                        Text(
+                                            text = "${(wallHeightM * 100).roundToInt()} cm",
+                                            color = TextMuted,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
                                 IconButton(
                                     onClick = { wallHeightM = (wallHeightM + 0.05f).coerceIn(1.8f, 3.2f) },
                                     modifier = Modifier.size(28.dp)
@@ -467,12 +521,21 @@ fun ARScanScreen(
                                 ) {
                                     Icon(Icons.Default.Remove, contentDescription = "Minus", tint = TextPrimary, modifier = Modifier.size(16.dp))
                                 }
-                                Text(
-                                    text = "${(wallDepthM * 100).roundToInt()} cm",
-                                    color = TextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = DimensionFormatter.formatLength(wallDepthM * 100f, unitSystem, compact = true),
+                                        color = TextPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    if (unitSystem != UnitSystem.CENTIMETERS) {
+                                        Text(
+                                            text = "${(wallDepthM * 100).roundToInt()} cm",
+                                            color = TextMuted,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
                                 IconButton(
                                     onClick = { wallDepthM = (wallDepthM + 0.05f).coerceIn(0.4f, 1.0f) },
                                     modifier = Modifier.size(28.dp)
@@ -486,6 +549,10 @@ fun ARScanScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     // Tailored Fit Recommendation Row
+                    val fitWStr = DimensionFormatter.formatLength(recommendedWardrobeWidthCm.toFloat(), unitSystem, compact = true)
+                    val fitHStr = DimensionFormatter.formatLength(recommendedWardrobeHeightCm.toFloat(), unitSystem, compact = true)
+                    val fitDStr = DimensionFormatter.formatLength(60f, unitSystem, compact = true)
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -494,7 +561,7 @@ fun ARScanScreen(
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = "✨ Calculated Wardrobe: $recommendedWardrobeWidthCm W × $recommendedWardrobeHeightCm H × 60 D cm (10cm side & 15cm top margins)",
+                            text = "✨ Calculated Wardrobe: $fitWStr W × $fitHStr H × $fitDStr D (${recommendedWardrobeWidthCm}×${recommendedWardrobeHeightCm}×60 cm with margins)",
                             color = Color(0xFF94A3B8),
                             fontSize = 11.sp
                         )
@@ -538,13 +605,14 @@ fun ARScanScreen(
 
 /**
  * Screen 4: Place Wardrobe Screen
- * "Wall detected ✓", "3.86 m available", "Tap to place"
+ * "Wall detected ✓", "12′ 8″ (3.86 m) available", "Tap to place"
  */
 @Composable
 fun PlaceWardrobeScreen(
     roomMeasurement: RoomMeasurement,
     onClose: () -> Unit,
     onPlaceWardrobe: () -> Unit,
+    unitSystem: UnitSystem = UnitSystem.FEET_INCHES,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -611,8 +679,10 @@ fun PlaceWardrobeScreen(
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(4.dp))
+            val wallAvailFormatted = DimensionFormatter.formatRoomMeters(roomMeasurement.detectedWallWidthM, unitSystem)
+            val wallSecondary = if (unitSystem != UnitSystem.CENTIMETERS) "(${roomMeasurement.detectedWallWidthM} m)" else ""
             Text(
-                text = "${roomMeasurement.detectedWallWidthM} m available",
+                text = "$wallAvailFormatted $wallSecondary available",
                 color = TextSecondary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Normal

@@ -30,20 +30,30 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+import android.graphics.Bitmap
+import com.example.model.WardrobeProject
+import com.example.model.SiteCapture
+import com.example.model.MeasurementConfidence
+
 enum class AppScreen {
-    SPLASH,             // 1. Splash Screen
-    HOME,               // 2. Home Screen
-    AR_SCAN,            // 3. AR Scan
-    PLACE_WARDROBE,     // 4. Place Wardrobe
-    AR_STUDIO,          // 5. Adjust & Customize
-    INTERIOR_CONFIG,    // 6. Interior Configuration
-    FINISH_SELECTION,   // 7. Finish Selection
-    AUTOFIT_SCREEN,     // 8. AutoFit Screen
-    OPEN_WARDROBE,      // 9. Open Wardrobe
-    SAVE_CONFIRMATION,  // 10. Save Confirmation
-    SHARE_DETAILS,      // 11. Share Details
-    SPACES_TAB,         // 12. Saved Spaces
-    EXPLORE_TAB         // 13. Explore
+    SPLASH,                 // 1. Splash Screen
+    HOME,                   // 2. Home Screen
+    SITE_CAMERA_CAPTURE,    // 3. Calibrated Site Photo Capture
+    SITE_CALIBRATION,       // 4. Space Calibration (4-point Quad)
+    SITE_PHOTO_EDITOR,      // 5. Static Site Photo 3D Studio
+    TECHNICAL_DRAWING,      // 6. 2D CAD Technical Drawings (Front/Interior/Plan/Side)
+    CARPENTER_SHARE,        // 7. Share with Carpenter (ZIP, DXF, PDF, MP4)
+    AR_SCAN,                // 8. Live AR Scan
+    PLACE_WARDROBE,         // 9. Place Wardrobe in Live AR
+    AR_STUDIO,              // 10. Live AR Studio
+    INTERIOR_CONFIG,        // 11. Interior Configuration
+    FINISH_SELECTION,       // 12. Finish Selection
+    AUTOFIT_SCREEN,         // 13. AutoFit Screen
+    OPEN_WARDROBE,          // 14. Open Wardrobe
+    SAVE_CONFIRMATION,      // 15. Save Confirmation
+    SHARE_DETAILS,          // 16. Share Details
+    SPACES_TAB,             // 17. Saved Spaces
+    EXPLORE_TAB             // 18. Explore
 }
 
 enum class NavigationTab {
@@ -56,6 +66,8 @@ data class VisionSpaceUiState(
     val currentScreen: AppScreen = AppScreen.SPLASH,
     val selectedTab: NavigationTab = NavigationTab.DESIGN,
     val currentConfig: WardrobeConfig = PresetCatalog.PRESETS.first().config,
+    val currentProject: WardrobeProject = WardrobeProject(wardrobeConfig = PresetCatalog.PRESETS.first().config),
+    val siteBitmap: Bitmap? = null,
     val placement: ARPlacementState = ARPlacementState(),
     val roomMeasurement: RoomMeasurement = RoomMeasurement(),
     val selectedPresetId: String = PresetCatalog.PRESETS.first().id,
@@ -354,6 +366,12 @@ class VisionSpaceViewModel(application: Application) : AndroidViewModel(applicat
         )
     }
 
+    fun updateConfig(config: WardrobeConfig) {
+        _uiState.value = _uiState.value.copy(
+            currentConfig = config
+        )
+    }
+
     // Spatial Manipulation & D-Pad
     fun rotateYaw(deltaDegrees: Float) {
         val currentPlacement = _uiState.value.placement
@@ -527,6 +545,66 @@ class VisionSpaceViewModel(application: Application) : AndroidViewModel(applicat
         val shareIntent = Intent.createChooser(sendIntent, "Share VisionSpace Wardrobe Design")
         shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(shareIntent)
+    }
+
+    fun startPhotoCaptureFlow() {
+        _uiState.value = _uiState.value.copy(currentScreen = AppScreen.SITE_CAMERA_CAPTURE)
+    }
+
+    fun onSitePhotoCaptured(siteCapture: SiteCapture, bitmap: Bitmap) {
+        val updatedProject = _uiState.value.currentProject.copy(
+            siteCapture = siteCapture,
+            wardrobeConfig = _uiState.value.currentConfig
+        )
+        _uiState.value = _uiState.value.copy(
+            currentProject = updatedProject,
+            siteBitmap = bitmap,
+            currentScreen = AppScreen.SITE_PHOTO_EDITOR,
+            statusMessage = "Site photo captured with spatial calibration"
+        )
+    }
+
+    fun onStartGalleryCalibration(bitmap: Bitmap) {
+        val siteCapture = SiteCapture(
+            imageWidthPx = bitmap.width,
+            imageHeightPx = bitmap.height,
+            confidence = MeasurementConfidence.VISUAL_ONLY
+        )
+        _uiState.value = _uiState.value.copy(
+            siteBitmap = bitmap,
+            currentProject = _uiState.value.currentProject.copy(siteCapture = siteCapture),
+            currentScreen = AppScreen.SITE_CALIBRATION
+        )
+    }
+
+    fun onCalibrationCompleted(siteCapture: SiteCapture) {
+        val updatedProject = _uiState.value.currentProject.copy(siteCapture = siteCapture)
+        _uiState.value = _uiState.value.copy(
+            currentProject = updatedProject,
+            currentScreen = AppScreen.SITE_PHOTO_EDITOR,
+            statusMessage = "Calibration applied • Ready to design"
+        )
+    }
+
+    fun updateProject(project: WardrobeProject) {
+        _uiState.value = _uiState.value.copy(
+            currentProject = project,
+            currentConfig = project.wardrobeConfig
+        )
+    }
+
+    fun openTechnicalDrawing() {
+        _uiState.value = _uiState.value.copy(
+            currentProject = _uiState.value.currentProject.copy(wardrobeConfig = _uiState.value.currentConfig),
+            currentScreen = AppScreen.TECHNICAL_DRAWING
+        )
+    }
+
+    fun openCarpenterShare() {
+        _uiState.value = _uiState.value.copy(
+            currentProject = _uiState.value.currentProject.copy(wardrobeConfig = _uiState.value.currentConfig),
+            currentScreen = AppScreen.CARPENTER_SHARE
+        )
     }
 
     fun clearStatusMessage() {

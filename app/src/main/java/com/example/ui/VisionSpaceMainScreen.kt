@@ -25,7 +25,9 @@ import com.example.ui.components.ARScanScreen
 import com.example.ui.components.ARStudioScreen
 import com.example.ui.components.AutoFitScreen
 import com.example.ui.components.BOMReportDialog
+import com.example.ui.components.CalibratedCameraCaptureScreen
 import com.example.ui.components.CameraView
+import com.example.ui.components.CarpenterShareScreen
 import com.example.ui.components.ExploreScreen
 import com.example.ui.components.FinishSelectionScreen
 import com.example.ui.components.HomeScreen
@@ -34,8 +36,11 @@ import com.example.ui.components.OpenWardrobeScreen
 import com.example.ui.components.PlaceWardrobeScreen
 import com.example.ui.components.SaveConfirmationScreen
 import com.example.ui.components.ShareDetailsScreen
+import com.example.ui.components.SiteCalibrationScreen
+import com.example.ui.components.SitePhotoEditorScreen
 import com.example.ui.components.SpacesScreen
 import com.example.ui.components.SplashScreen
+import com.example.ui.components.TechnicalDrawingScreen
 import com.example.ui.components.VisionSpaceBottomNav
 import com.example.ui.components.VisionSpaceMenuSheet
 import com.example.ui.theme.ObsidianBackground
@@ -122,8 +127,84 @@ fun VisionSpaceMainScreen(
                     AppScreen.HOME -> {
                         HomeScreen(
                             onDesignInAR = { viewModel.startDesigningFlow() },
+                            onStartPhotoCapture = { viewModel.startPhotoCaptureFlow() },
                             onOpenSpaces = { viewModel.selectTab(NavigationTab.SPACES) },
                             onOpenExplore = { viewModel.selectTab(NavigationTab.EXPLORE) }
+                        )
+                    }
+
+                    // Calibrated Camera Capture Screen
+                    AppScreen.SITE_CAMERA_CAPTURE -> {
+                        CalibratedCameraCaptureScreen(
+                            onPhotoCaptured = { siteCapture, bmp ->
+                                viewModel.onSitePhotoCaptured(siteCapture, bmp)
+                            },
+                            onPickFromGallery = { bmp ->
+                                viewModel.onStartGalleryCalibration(bmp)
+                            },
+                            onBack = { viewModel.navigateTo(AppScreen.HOME) }
+                        )
+                    }
+
+                    // Space Calibration Screen (4-Point Wall Quad)
+                    AppScreen.SITE_CALIBRATION -> {
+                        uiState.siteBitmap?.let { bmp ->
+                            SiteCalibrationScreen(
+                                siteBitmap = bmp,
+                                initialCapture = uiState.currentProject.siteCapture,
+                                onCompleteCalibration = { capture ->
+                                    viewModel.onCalibrationCompleted(capture)
+                                },
+                                onBack = { viewModel.navigateTo(AppScreen.SITE_CAMERA_CAPTURE) }
+                            )
+                        } ?: run {
+                            viewModel.navigateTo(AppScreen.HOME)
+                        }
+                    }
+
+                    // Site Photo Parametric 3D Editor Screen
+                    AppScreen.SITE_PHOTO_EDITOR -> {
+                        uiState.siteBitmap?.let { bmp ->
+                            SitePhotoEditorScreen(
+                                project = uiState.currentProject,
+                                siteBitmap = bmp,
+                                onUpdateProject = { updated ->
+                                    viewModel.updateProject(updated)
+                                },
+                                onOpenTechnicalDrawing = {
+                                    viewModel.openTechnicalDrawing()
+                                },
+                                onOpenCarpenterShare = {
+                                    viewModel.openCarpenterShare()
+                                },
+                                onOpenVideoScreen = {
+                                    viewModel.openCarpenterShare()
+                                },
+                                onPreviewInLiveAR = {
+                                    viewModel.navigateTo(AppScreen.PLACE_WARDROBE)
+                                },
+                                onBack = { viewModel.navigateTo(AppScreen.HOME) }
+                            )
+                        } ?: run {
+                            // If no photo, route to calibrated capture
+                            viewModel.navigateTo(AppScreen.SITE_CAMERA_CAPTURE)
+                        }
+                    }
+
+                    // 2D Architectural Technical Drawing Studio
+                    AppScreen.TECHNICAL_DRAWING -> {
+                        TechnicalDrawingScreen(
+                            project = uiState.currentProject,
+                            onOpenShare = { viewModel.openCarpenterShare() },
+                            onBack = { viewModel.navigateTo(AppScreen.SITE_PHOTO_EDITOR) }
+                        )
+                    }
+
+                    // Carpenter & Contractor Export Share Hub
+                    AppScreen.CARPENTER_SHARE -> {
+                        CarpenterShareScreen(
+                            project = uiState.currentProject,
+                            onBack = { viewModel.navigateTo(AppScreen.SITE_PHOTO_EDITOR) }
                         )
                     }
 
@@ -137,7 +218,9 @@ fun VisionSpaceMainScreen(
                             onScanReady = { viewModel.navigateTo(AppScreen.PLACE_WARDROBE) },
                             onGenerateCustomWardrobe = { wM, hM, dM ->
                                 viewModel.generateWardrobeForMeasuredSpace(wM, hM, dM)
-                            }
+                            },
+                            unitSystem = uiState.unitSystem,
+                            onToggleUnit = { viewModel.toggleUnitSystem() }
                         )
                     }
 
@@ -146,7 +229,8 @@ fun VisionSpaceMainScreen(
                         PlaceWardrobeScreen(
                             roomMeasurement = uiState.roomMeasurement,
                             onClose = { viewModel.navigateTo(AppScreen.HOME) },
-                            onPlaceWardrobe = { viewModel.placeWardrobeInAR() }
+                            onPlaceWardrobe = { viewModel.placeWardrobeInAR() },
+                            unitSystem = uiState.unitSystem
                         )
                     }
 
@@ -329,6 +413,9 @@ fun VisionSpaceMainScreen(
                     initialUnitSystem = uiState.unitSystem,
                     onDimensionsChange = { w, h, d ->
                         viewModel.updateDimensions(w, h, d)
+                    },
+                    onConfigChange = { newConfig ->
+                        viewModel.updateConfig(newConfig)
                     },
                     onSaveToVault = { customName ->
                         viewModel.saveCurrentDesign(customName)

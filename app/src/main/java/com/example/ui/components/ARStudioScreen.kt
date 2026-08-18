@@ -198,6 +198,11 @@ fun ARStudioScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 QuickActionFab(
+                    label = if (currentConfig.doorOpenRatio > 0.5f) "Close ✕" else "Open ◫",
+                    onClick = onToggleDoors,
+                    testTag = "fab_toggle_doors"
+                )
+                QuickActionFab(
                     label = "Interior",
                     onClick = onOpenInterior,
                     testTag = "fab_interior"
